@@ -1,6 +1,11 @@
 ---
-title: "EV Power - Lab 4 Project Report"
-format: typst
+title: "Clean Energy and Electric Vehicles"
+subtitle: "Analyzing the Relationship Between Renewable Energy and EV Adoption"
+format: pdf
+execute:
+  echo: true
+  warning: false
+  message: false
 ---
 
 # Example Solution 1
@@ -8,22 +13,111 @@ format: typst
 ## **Part 0: libraries**
 
 ```{r}
-
+library(tidyverse)
 ```
 
 ## **Part 1:** **Defining Research Question**
 
-Chosen Question:
+Chosen Question: In 2023, do states that use more renewable energy also have more EVs registered?
+
+This question addresses whether electric vehicle adoption is concentrated in states with cleaner energy grids. If EVs are primarily adopted in states with high renewable energy usage, it suggests that EVs are indeed contributing to emissions reductions. Conversely, if EV adoption is highest in states heavily reliant on fossil fuels, the environmental benefits may be more limited.
+
 
 ## **Part 2: Data Preparation and Cleaning**
 
 ```{r}
+# Part 2: Data Preparation and Cleaning
 
+# Load renewable energy data for 2023
+renew_2023 <- read_csv("data/renew-use-2023.csv")
+
+# Load total energy use for 2023
+total_2023 <- read_csv("data/total-use-2023.csv")
+
+# Load EV registrations for 2023 - skip the first 2 rows and set column names
+ev_2023 <- read_csv("data/ev-registrations-by-state-2023.csv", 
+                     skip = 2,
+                     col_names = c("state", "ev_count"))
+
+# Clean renewable energy data
+renew_2023_clean <- renew_2023 %>%
+  mutate(
+    renewable_value = parse_number(Renewable_Use_2023),
+    state = str_to_upper(str_trim(State))
+  ) %>%
+  group_by(state) %>%
+  summarize(total_renewable = sum(renewable_value, na.rm = TRUE))
+
+# Clean total energy data
+total_2023_clean <- total_2023 %>%
+  pivot_longer(
+    cols = -Energy_Source,
+    names_to = "state",
+    values_to = "energy_value"
+  ) %>%
+  mutate(state = str_to_upper(state)) %>%
+  group_by(state) %>%
+  summarize(total_energy = sum(energy_value, na.rm = TRUE))
+
+# Clean EV registrations data
+ev_2023_clean <- ev_2023 %>%
+  mutate(
+    ev_registrations = parse_number(ev_count),
+    state = str_to_upper(str_trim(state))
+  ) %>%
+  filter(state != "TOTAL") %>%
+  select(state, ev_registrations)
+
+# Display samples
+head(renew_2023_clean)
+head(total_2023_clean)
+head(ev_2023_clean)
 ```
 
 ## **Part 3: Joining / Pivoting Datasets for Analysis**
 
 ```{r}
+# Part 3: Joining and Creating Analysis Variables (WITH DEBUGGING)
+
+# First, let's see what we have
+cat("Renewable data rows:", nrow(renew_2023_clean), "\n")
+cat("Total energy data rows:", nrow(total_2023_clean), "\n")
+cat("EV data rows:", nrow(ev_2023_clean), "\n")
+
+# Check a few state names from each dataset
+cat("\nSample states from renewable data:\n")
+head(renew_2023_clean$state)
+cat("\nSample states from total energy data:\n")
+head(total_2023_clean$state)
+cat("\nSample states from EV data:\n")
+head(ev_2023_clean$state)
+
+# Join all datasets
+combined_data <- renew_2023_clean %>%
+  left_join(total_2023_clean, by = "state") %>%
+  left_join(ev_2023_clean, by = "state")
+
+cat("\nRows after joining:", nrow(combined_data), "\n")
+cat("Rows with EV data:", sum(!is.na(combined_data$ev_registrations)), "\n")
+
+# Now filter
+combined_data <- combined_data %>%
+  filter(!is.na(ev_registrations), 
+         !is.na(total_renewable),
+         !is.na(total_energy),
+         state != "US",
+         total_energy > 0) %>%
+  mutate(
+    renewable_pct = (total_renewable / total_energy) * 100,
+    renewable_pct = round(renewable_pct, 2)
+  )
+
+# Display the combined dataset
+cat("\nFinal rows:", nrow(combined_data), "\n")
+head(combined_data, 10)
+
+# Summary statistics
+summary(combined_data %>% select(renewable_pct, ev_registrations, total_energy))
 
 ```
 
@@ -31,4 +125,37 @@ Chosen Question:
 
 ```{r}
 
+# Part 4: Visualization
+
+# Calculate correlation
+correlation <- cor(combined_data$renewable_pct, 
+                   combined_data$ev_registrations)
+
+cat("Correlation:", correlation, "\n")
+
+# Scatter plot: Renewable Percentage vs EV Registrations
+combined_data %>%
+  mutate(state_label = ifelse(ev_registrations > 80000 | renewable_pct > 30, state, "")) %>%
+  ggplot(aes(x = renewable_pct, y = ev_registrations)) +
+  geom_point(aes(size = total_energy, color = renewable_pct), alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "dashed") +
+  geom_text(aes(label = state_label), vjust = -0.8, size = 3, check_overlap = TRUE) +
+  scale_y_log10(labels = scales::comma) +
+  scale_color_gradient(low = "blue", high = "green", name = "Renewable %") +
+  scale_size_continuous(name = "Total Energy\nUse (BTU)", labels = scales::comma) +
+  labs(
+    title = "Relationship Between Renewable Energy and EV Adoption (2023)",
+    x = "Renewable Energy (% of Total)",
+    y = "EV Registrations (log scale)",
+    subtitle = paste0("Correlation: ", round(correlation, 3))
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "right"
+  )
 ```
+
+The scatterplot compares renewable energy share and EV registrations for 2023.
+If the pattern shows an upward slope, that suggests states investing in renewable energy also tend to have more EVs, indicating a cleaner transportation-energy ecosystem.
+If there’s no clear relationship, it implies EV adoption may depend more on infrastructure, incentives, or population density than renewable availability.```
